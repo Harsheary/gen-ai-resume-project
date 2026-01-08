@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, Path
+from fastapi import FastAPI, UploadFile, Path, Form
 from .utils.file import save_to_disc
 from .db.collections.files import files_collection, FileSchema
 from .queue.q import q
@@ -16,7 +16,10 @@ async def get_file_by_id(id: str = Path(..., description="ID of the file")):
         "_id": str(db_file["_id"]),
         "name": db_file["name"],
         "status": db_file["status"],
-        "result": db_file["result"] if "result" in db_file else None
+        "job_description": db_file.get("job_description"),
+        "enhanced_job_description": db_file.get("enhanced_job_description"),
+        "result": db_file.get("result"),
+        "analysis": db_file.get("analysis")
     }
 
 
@@ -26,12 +29,13 @@ def hello():
 
 
 @app.post("/upload")
-async def upload_file(file: UploadFile):
+async def upload_file(file: UploadFile, job_description: str = Form(...)):
     # entry in mongo
     db_file = await files_collection.insert_one(
         document=FileSchema(
             name=file.filename,
-            status="saving"
+            status="saving",
+            job_description=job_description
         )
     )
 
@@ -40,7 +44,7 @@ async def upload_file(file: UploadFile):
     await save_to_disc(file=await file.read(), path=file_path)
     
     # push to queue
-    q.enqueue(process_file, str(db_file.inserted_id), file_path=file_path)
+    q.enqueue(process_file, str(db_file.inserted_id), file_path=file_path, job_description=job_description)
 
     # mongo save
     await files_collection.update_one({"_id": db_file.inserted_id}, {
